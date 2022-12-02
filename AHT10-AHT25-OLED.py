@@ -18,15 +18,19 @@ sensor1 = ahtx0.AHT10(i2c1) # AHT10 sensor
 i2c2 = SoftI2C(scl=Pin(21), sda=Pin(20), freq=400_000)
 sensor2 = aht.AHT2x(i2c2, crc=True) # AHT25 sensor
 
-readInterval = 0.5  # seconds between each reading
-avgCount = 10       # how many readings to average
+i2c3 = SoftI2C(sda=Pin(14), scl=Pin(15),  freq=400_000)
+sensor3 = ahtx0.AHT10(i2c3) # another AHT10 sensor
+
+
+readInterval = 1  # seconds between each reading
+avgCount = 5       # how many readings to average
 
 write = ssd1306big  # set up OLED display
 
 tStart = time.time()  # seconds since epoch
 f = 0.01  # lowpass filter fraction
 dAvg = sensor1.temperature
-print("epoch,degC,dAvg,T2,RH1,RH2") # CSV column headers
+print("epoch,degC,dAvg,T2,T3,RH1,RH2,RH3") # CSV column headers
 
 
 while True:
@@ -34,17 +38,23 @@ while True:
     Hsum1 = 0
     Tsum2 = 0
     Hsum2 = 0
+    Tsum3 = 0
+    Hsum3 = 0
     for i in range(avgCount):
         Tsum1 += sensor1.temperature
         Hsum1 += sensor1.relative_humidity
         Hsum2 += sensor2.humidity
         Tsum2 += sensor2.temperature
+        Hsum3 += sensor3.relative_humidity
+        Tsum3 += sensor3.temperature
         utime.sleep(readInterval)
         
     degC = Tsum1 / avgCount
     RH1 = Hsum1 / avgCount
     degC2 = Tsum2 / avgCount
     RH2 = Hsum2 / avgCount
+    degC3 = Tsum3 / avgCount
+    RH3 = Hsum3 / avgCount
     
     dAvg = dAvg * (1.0-f) + (f*degC)
     msg1 = "%.3f C" % (degC)
@@ -54,7 +64,8 @@ while True:
     #T2 = sensor2.temperature
         
     epoch=utime.time() # UNIX epoch, in local time zone
-    print("%d, %0.3f, %0.4f, %0.3f, %0.2f,%0.2f" % (epoch,degC,dAvg,degC2,RH1,RH2))
+    print("%d, %0.3f, %0.4f, %0.3f,%0.3f, %0.2f,%0.2f,%0.2f" %
+          (epoch,degC,dAvg,degC2,degC3,RH1,RH2,RH3))
     
     write.clear()
     write.line1(msg1)
