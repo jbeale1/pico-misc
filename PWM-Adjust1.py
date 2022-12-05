@@ -1,11 +1,12 @@
 # Set PWM level manually with potentiometer
-# Use 1.3" SH1106 OLED display
+# Also measure Vsys voltage with ADC
+# Uses 1.3" SH1106 OLED display
 # Pi Pico, uPython v1.15
 # 4-Dec-2022 J.Beale
 
 from machine import Pin, ADC, PWM, I2C
 from time import sleep, time
-import sh1106  # 1.3" wide OLED display
+import sh1106  # OLED driver from github.com/robert-hh/SH1106y
 
 swVersion = "PWM Control 1.1"
 
