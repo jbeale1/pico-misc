@@ -1,6 +1,8 @@
 """
 # vsys.py : Read Pico Vsys voltage using ADC channel 3 (GPIO 29)
 # takes parameters ADC Vref and Voffset (ideally would be 3.3,0)
+# NOTE: ONLY for pico board, does not work as intended on pico-W 
+# for details see forums.raspberrypi.com/viewtopic.php?t=340919
 # J.Beale 4-Dec-2022
 
 # Usage Example:
