@@ -44,10 +44,30 @@ CMD_DoReset   = b'\x30\xa2' # soft reset command
 CMD_HeaterOn  = b'\x30\x6d' # turn heater on
 CMD_HeaterOff = b'\x30\x66' # turn heater off
  
+# calculates 8-Bit checksum for SHT3x using given polynomial
+def CRC_8(data):
+  POLY = 0x131  # P(x) = x^8 + x^5 + x^4 + 1 = 100110001
+  crc = 0xff    # CRC is single byte, starting with value 0xFF
+  for byte in data:
+    crc ^= byte
+    for _ in range (8):
+      if(crc & 0x80):
+          crc = (crc << 1) ^ POLY
+      else:
+          crc = (crc << 1)
+  return crc
+
 def TRH_get(self): # for SHT3x Temp/RH sensor
         status = self.i2c.writeto(self.addr,CMD_DoOneShot) 
         utime.sleep(1)
         buf = self.i2c.readfrom(self.addr, 6) # get 6 bytes
+        buf1 = bytes([buf[0], buf[1], buf[2]])  # 2 bytes + CRC
+        c1 = CRC_8(buf1)  # should be zero
+        buf2 = bytes([buf[3], buf[4], buf[5]])  # 2 bytes + CRC
+        c2 = CRC_8(buf2)  # should be zero
+        if (c1 != 0) or (c2 != 0):  # CRC error on Temp or RH
+            print("# ERROR %d %d",c1,c2)
+            return([-999,-999])
         temperature_raw = buf[0] << 8 | buf[1]
         temperature = (175.0 * float(temperature_raw) / 65535.0) - 45
         humidity_raw = buf[3] << 8  | buf[4]
