@@ -3,14 +3,14 @@
 # Pi Pico, uPython v1.19.1
 # 08-Feb-2023 J.Beale
 
-from machine import Pin, ADC, PWM, I2C, SoftI2C
-from time import sleep, time, ticks_ms
-import utime
+from machine import Pin, ADC, PWM, I2C, SoftI2C, reset
+from time import sleep, sleep_ms, time, ticks_ms
+#import time
 import sh1106  # OLED  driver: github.com/robert-hh/SH1106
 import ahtx0   # AHT10 driver: github.com/targetblank/micropython_ahtx0
 import sys
 
-swVersion = "RH Readout 0.4"
+swVersion = "RH Readout 0.5"
 
 # I2C connection to OLED display (addr = 0x3c)
 i2c1 = I2C(1, sda=Pin(14,Pin.PULL_UP), scl=Pin(15,Pin.PULL_UP), freq=400_000)
@@ -58,8 +58,8 @@ def CRC_8(data):
   return crc
 
 def TRH_get(self): # for SHT3x Temp/RH sensor
-        status = self.i2c.writeto(self.addr,CMD_DoOneShot) 
-        utime.sleep(1)
+        status = self.i2c.writeto(self.addr,CMD_DoOneShot)
+        sleep_ms(16) # "HIGH" stability conversion may take 15 msec
         buf = self.i2c.readfrom(self.addr, 6) # get 6 bytes
         buf1 = bytes([buf[0], buf[1], buf[2]])  # 2 bytes + CRC
         c1 = CRC_8(buf1)  # should be zero
@@ -140,7 +140,6 @@ while True:
             Tsum4 += trhData[0]
             Hsum4 += trhData[1]
 
-            # utime.sleep(readInterval)
             
         degC = Tsum1 / avgCount
         RH = Hsum1 / avgCount
@@ -172,13 +171,11 @@ while True:
             SHT31_Heat = not (SHT31_Heat)
         TRH_SetHeat(sense4, SHT31_Heat)  # update the heater value
 
-        
     except OSError as e:
         print("Encountered OSError in main loop")
         print(e)
-        write.clear()      # update OLED display
-        write.line1("ERROR")
-        write.line2(e)
-        write.show() # refresh OLED display
-        time.sleep(5)
-        reset()            
+        msg1 = ("ERROR")
+        display.text(msg1,1,10, color=1)
+        display.show()
+        sleep(5)
+        # reset()
