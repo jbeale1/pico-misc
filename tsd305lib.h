@@ -38,4 +38,11 @@ private:
 	void tsdReadADCs(uint32_t *amb, uint32_t *obj);
 	float getTCF(void);
 	void tsdGetTempCompensation(float *offset, float *offsettc);
+	
+	// fixed parameters which can be read from EEPROM once only
+    float tc, tref;
+    float k4,k3,k2,k1,k0;
+    float tk4,tk3,tk2,tk1,tk0;
+    tsd_eeprom_struct s;
+
 };
