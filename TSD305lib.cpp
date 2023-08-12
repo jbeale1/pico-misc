@@ -4,25 +4,39 @@
 * Date        :   25/05/2020 
 * License     :   MIT
 * This code is published as open source software. Feel free to share/modify.
+* Modified by J.Beale for higher speed via fewer redundant reads. 8/12/2023
+*
+* Datasheet:  https://www.te.com/commerce/DocumentDelivery/DDEController?Action=showdoc&DocId=Data+Sheet%7FTSD305%7FA1%7Fpdf%7FEnglish%7FENG_DS_TSD305_A1.pdf%7F10213286-00
 */
 
 #include "tsd305lib.h"
 #include <Wire.h>
 
-#if (defined(AVR))
-	#include <avr/pgmspace.h>
-#else
-	#include <pgmspace.h>
+// #if (defined(AVR))
+//	#include <avr\pgmspace.h>
+// #else
+//#include <pgmspace.h>  // does not work for Pi Pico, and others
+// #endif
+
+// ESP32/ESP8266 includes <pgmspace.h> by default, and memccpy_P was already defined there
+#if !(ESP32 || ESP8266 || defined(ARDUINO_PORTENTA_H7_M7) || defined(ARDUINO_PORTENTA_H7_M4))
+  #include <avr/pgmspace.h>
+  #define memccpy_P(dest, src, c, n) memccpy((dest), (src), (c), (n))
 #endif
 
-// #define TSD_ADDR    (uint8_t)0x1E
-#define TSD_ADDR    (uint8_t)0x00
-#define TSD_ADC_CMD (uint8_t)0xAF
-#define CONV_DLY    60
+//#define TSD_ADDR    (uint8_t)0x1E // default address for TSD305-3C55
+#define TSD_ADDR    (uint8_t)0x00  // default address for TSD305-1C55, TSD305-2C55, TSD305-1SL10
+
+
+// 0xAF = 16 read average, 45 msec update rate
+// 0xAE = 8  read aveage, 20 msec update rate
+#define TSD_ADC_CMD (uint8_t)0xAF  
+
+
+// #define CONV_DLY    60
+#define CONV_DLY    46
 
 bool DEBUG = false;
-//bool DEBUG = true;
-bool DEBUG2 = false;
 
 tsd305::tsd305(void) {
 	// Constructor
@@ -37,9 +51,8 @@ tsd_eeprom_struct tsd305::begin(void) {
 tsd_eeprom_struct tsd305::begin(bool debug) {
   Wire.begin();
   if(debug) {
-  	DEBUG = true;
-    Serial.println();
-  }
+  	DEBUG = true;    
+  }  
   return tsdReadEeprom();
 }
 
@@ -71,25 +84,56 @@ uint16_t tsd305::tsdReadCoef(uint8_t addr) {
 
 // Get float value from TSD EEPROM
 float tsd305::tsdReadFloat(uint8_t addr) {
-  union i16f32  {
-    unsigned int iValue[2]; // 16bit unsigned integer
-    float fValue;           // float IEEE 754
-  } w32;
-
-  w32.iValue[1] = tsdReadCoef(addr);
-  w32.iValue[0] = tsdReadCoef(addr+1);
-  return w32.fValue;
+  uint16_t hw,lw;
+  uint32_t w;
+  hw = tsdReadCoef(addr);
+  lw = tsdReadCoef(addr+1);
+  w = (uint32_t)(hw << 16 | lw);
+  float y = *(float*)&w;
+  return y;
 }
 
+
 tsd_eeprom_struct tsd305::tsdReadEeprom() {
-  tsd_eeprom_struct s;
+
+  delay(10);
+  tc = tsdReadFloat(0x1E);
+  tref = tsdReadFloat(0x20);
+ 
+  k4 = tsdReadFloat(0x22);
+  k3 = tsdReadFloat(0x24);
+  k2 = tsdReadFloat(0x26);
+  k1 = tsdReadFloat(0x28);
+  k0 = tsdReadFloat(0x2A);
+
+  tk4 = tsdReadFloat(0x2E);
+  tk3 = tsdReadFloat(0x30);
+  tk2 = tsdReadFloat(0x32);
+  tk1 = tsdReadFloat(0x34);
+  tk0 = tsdReadFloat(0x36);
+  
   s.amb_min = (int16_t)tsdReadCoef(0x1A);
   s.amb_max = (int16_t)tsdReadCoef(0x1B);
   s.obj_min = (int16_t)tsdReadCoef(0x1C);
   s.obj_max = (int16_t)tsdReadCoef(0x1D);
   s.adc_cal = (int16_t)tsdReadCoef(0x2C);
+  
+  if (DEBUG) {
+    Serial.println("Just-read new k params:");
+    Serial.print("k4: ");
+    Serial.println(k4);
+    Serial.print("k3: ");
+    Serial.println(k3);
+    Serial.print("k2: ");
+    Serial.println(k2);
+    Serial.print("k2: ");
+    Serial.println(k1);
+    Serial.print("k2: ");
+    Serial.println(k0);
+  }
+
   if(DEBUG) {
-    Serial.println("Reading TSD305 EEPROM Parameters:");
+    Serial.println("Previously read TSD305 EEPROM Parameters:");
     Serial.print("[+] amb_min: ");
     Serial.println(s.amb_min,DEC);
     Serial.print("[+] amb_max: ");
@@ -103,6 +147,7 @@ tsd_eeprom_struct tsd305::tsdReadEeprom() {
   }
   return s;
 }
+
 
 void tsd305::tsdReadADCs(uint32_t *amb, uint32_t *obj) {
   uint8_t buf[7], i;
@@ -120,10 +165,10 @@ void tsd305::tsdReadADCs(uint32_t *amb, uint32_t *obj) {
   *obj = ((uint32_t)buf[1] << 16) | ((uint32_t)buf[2] << 8) | (uint32_t)buf[3];
   *amb = ((uint32_t)buf[4] << 16) | ((uint32_t)buf[5] << 8) | (uint32_t)buf[6];
 
-  if(DEBUG2) {
-    Serial.print("Amb ADC: ");
-    Serial.print(*amb);
-    Serial.print("  Obj ADC: ");
+  if(DEBUG) {
+    Serial.print("Ambient ADC Value (24-Bit): ");
+    Serial.println(*amb);
+    Serial.print("Object ADC Value (24-Bit): ");
     Serial.println(*obj);
   }
 }
@@ -132,7 +177,7 @@ float tsd305::getSensorTemp(void) {
 	uint32_t adc_amb, adc_obj;
 	tsd_eeprom_struct t;
 	tsdReadADCs(&adc_amb, &adc_obj);
-	t = tsdReadEeprom();
+	t = s;
   float ts = ((adc_amb/(pow(2,24)))*(t.amb_max - t.amb_min) + t.amb_min);
   if(DEBUG) {
     Serial.print("Sensor Temp (°C): ");
@@ -142,7 +187,6 @@ float tsd305::getSensorTemp(void) {
 }
 
 float tsd305::getTCF(void) {
-
 	float tsens = getSensorTemp();
   float tc, tref, tcf;
   tc = tsdReadFloat(0x1E);
@@ -157,12 +201,7 @@ float tsd305::getTCF(void) {
 
 void tsd305::tsdGetTempCompensation(float *offset, float *offsettc) {
 	float tsens = getSensorTemp();
-  float k4,k3,k2,k1,k0;
-  k4 = tsdReadFloat(0x22);
-  k3 = tsdReadFloat(0x24);
-  k2 = tsdReadFloat(0x26);
-  k1 = tsdReadFloat(0x28);
-  k0 = tsdReadFloat(0x2A);
+
   *offset = (k4*pow(tsens,4))
             + (k3*pow(tsens,3))
             + (k2*pow(tsens,2))
@@ -179,50 +218,47 @@ void tsd305::tsdGetTempCompensation(float *offset, float *offsettc) {
 }
 
 float tsd305::getObjectTemp(void) {
-  float tk4,tk3,tk2,tk1,tk0;
   float adc_comp, adc_comptc;
   float tempOut;
-
-  float tsens = getSensorTemp();
-
+  uint32_t adc_amb, adc_obj;
+  
+  tsdReadADCs(&adc_amb, &adc_obj);  
+  float tsens = ((adc_amb/(pow(2,24)))*(s.amb_max - s.amb_min) + s.amb_min);
   float offset, offsettc;
-  tsdGetTempCompensation(&offset, &offsettc);
-
-  uint32_t adc_obj, adc_amb;
-  tsdReadADCs(&adc_amb, &adc_obj);
-
-  tk4 = tsdReadFloat(0x2E);
-  tk3 = tsdReadFloat(0x30);
-  tk2 = tsdReadFloat(0x32);
-  tk1 = tsdReadFloat(0x34);
-  tk0 = tsdReadFloat(0x36);
+  float tcf = 1 + ((tsens-tref)*tc);
+ 
+  if(DEBUG) {
+    Serial.println("New Params:");
+	Serial.print("Amb_max: ");
+	Serial.println(s.amb_max);
+    Serial.print("k4: ");
+    Serial.println(k4,4);
+    Serial.print("k3: ");
+    Serial.println(k3,3);
+    Serial.print("k2: ");
+    Serial.println(k2);
+    Serial.print("k1: ");
+    Serial.println(k1);
+    Serial.print("k0: ");
+    Serial.println(k0);
+  }
+   
+  offset = (k4*pow(tsens,4))
+            + (k3*pow(tsens,3))
+            + (k2*pow(tsens,2))
+            + (k1*tsens)
+            + k0;
+  offsettc = offset * tcf;
+  
   adc_comp = offsettc + adc_obj - pow(2,23);
-  adc_comptc = adc_comp / getTCF();
+  adc_comptc = adc_comp / tcf;
   tempOut = tk4*pow(adc_comptc,4)
             + tk3*pow(adc_comptc,3)
             + tk2*pow(adc_comptc,2)
             + tk1*adc_comptc
             + tk0;
-  if(DEBUG) {
-    Serial.print(tk4,6);
-    Serial.print(", ");
-    Serial.print(tk3,6);
-    Serial.print(", ");
-    Serial.print(tk2,6);
-    Serial.print(", ");
-    Serial.print(tk1,6);
-    Serial.print(", ");
-    Serial.print(tk0,6);
-    Serial.println(" ");
-    Serial.print("Object Temperature (°C): ");
-    Serial.println(tempOut);
-  }
-	
-  // float tCrude = 24.0 + (((float)adc_obj - 8382000.0) * (1.8E-4));
-	//Serial.print("  Conv: ");
-	//Serial.println(tCrude,3);
+
   return tempOut;
-  //return tCrude;
 }
 
 float tsd305::DtoF(float temp) {
